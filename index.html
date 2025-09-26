@@ -36,16 +36,6 @@
             box-sizing: border-box;
         }
 
-        /* --- Game World Perspective --- */
-        #game-world {
-            perspective: 800px;
-        }
-
-        #game-lanes {
-            transform-style: preserve-3d;
-            transform: rotateX(45deg);
-        }
-
         /* --- Dynamic Day/Night Cycle --- */
         .dawn { filter: brightness(0.9) saturate(1.1); background: linear-gradient(to top, #2c3e50, #4e5a65); }
         .midday { filter: brightness(1.1); background: linear-gradient(to top, #3498db, #85c1e9); }
@@ -457,44 +447,34 @@
             const playerRect = player.getBoundingClientRect();
             const containerRect = gameContainer.getBoundingClientRect();
 
-            bullet.style.left = `${playerRect.left - containerRect.left + (playerRect.width / 2) - 4 + spread}px`;
-            bullet.style.bottom = `${config.playerBaseY + playerRect.height}px`;
+            // Position bullet at player's position
+            const playerCenterX = gameState.playerLane === 0 ? '25%' : '75%';
+            bullet.style.left = playerCenterX;
+            bullet.style.transform = 'translateX(-50%)';
+            bullet.style.bottom = '120px'; // Fixed bottom position above player
 
-            defenseContainer.appendChild(bullet);
+            gameContainer.appendChild(bullet);
 
             gameState.bullets.push({
                 element: bullet,
-                y: config.playerBaseY + playerRect.height,
+                y: 120, // Starting Y position
                 ricochetCount: playerState.ricochetActive ? 1 : 0,
-                lane: gameState.playerLane // Add the lane the bullet was fired in
+                lane: gameState.playerLane
             });
         }
         
         function updateBullets(deltaTime) {
-            gameState.bullets.forEach((bullet, index) => {
-                bullet.y += 10; // Speed
+            for (let i = gameState.bullets.length - 1; i >= 0; i--) {
+                const bullet = gameState.bullets[i];
+                bullet.y += deltaTime * 1.5; // Increased speed
                 bullet.element.style.bottom = `${bullet.y}px`;
 
-                // Wall collision for ricochet
-                if (bullet.ricochetCount > 0) {
-                    const bulletRect = bullet.element.getBoundingClientRect();
-                    const laneElements = document.querySelectorAll('.lane');
-                    const leftLaneRect = laneElements[0].getBoundingClientRect();
-                    const rightLaneRect = laneElements[1].getBoundingClientRect();
-                    
-                    // This is a simplified check
-                    if (bulletRect.left < leftLaneRect.left || bulletRect.right > rightLaneRect.right) {
-                        // In a real 3D setup, we'd reverse velocity X. Here we fake it.
-                        // For this demo, ricochet is conceptual. A real implementation would need more complex physics.
-                        bullet.ricochetCount = 0; // Use up the ricochet
-                    }
-                }
-
-                if (bullet.y > window.innerHeight) {
+                // Check if bullet has reached the top of the screen
+                if (bullet.y > window.innerHeight - 50) { // Leave some margin from the top
                     bullet.element.remove();
-                    gameState.bullets.splice(index, 1);
+                    gameState.bullets.splice(i, 1);
                 }
-            });
+            }
         }
         
         // --- Zombie Logic ---
@@ -615,10 +595,14 @@
 
         // --- Collision Detection ---
         function checkCollisions() {
-            gameState.bullets.forEach((bullet, bIndex) => {
+            for (let bIndex = gameState.bullets.length - 1; bIndex >= 0; bIndex--) {
+                const bullet = gameState.bullets[bIndex];
+                if (!bullet || !bullet.element) continue;
                 const bulletRect = bullet.element.getBoundingClientRect();
-                gameState.zombies.forEach((zombie, zIndex) => {
-                    if (bullet.lane !== zombie.lane) return; // Use bullet's lane for check
+
+                for (let zIndex = gameState.zombies.length - 1; zIndex >= 0; zIndex--) {
+                    const zombie = gameState.zombies[zIndex];
+                    if (bullet.lane !== zombie.lane) continue;
 
                     const zombieRect = zombie.element.getBoundingClientRect();
                     if (bulletRect.left < zombieRect.right &&
@@ -642,13 +626,13 @@
                             updateUI();
                         }
                         
-                        if (bullet.ricochetCount <= 0) {
-                             bullet.element.remove();
-                             gameState.bullets.splice(bIndex, 1);
-                        }
+                        // Always remove bullet on hit
+                        bullet.element.remove();
+                        gameState.bullets.splice(bIndex, 1);
+                        break; // Exit the inner loop since bullet is gone
                     }
-                });
-            });
+                }
+            }
         }
         
         // --- Powerups ---
@@ -659,7 +643,7 @@
             const powerup = {
                 type: type,
                 lane: zombie.lane,
-                y: zombie.y,
+                y: window.innerHeight - 100, // Start near top of screen, y is position from bottom
                 element: document.createElement('div')
             };
 
@@ -676,30 +660,28 @@
 
             powerup.element.style.left = zombie.lane === 0 ? '25%' : '75%';
             powerup.element.style.transform = 'translateX(-50%)';
-            powerup.element.style.top = `${powerup.y}px`;
+            powerup.element.style.bottom = `${powerup.y}px`;
 
             document.getElementById('game-lanes').appendChild(powerup.element);
             gameState.powerups.push(powerup);
         }
         
         function updatePowerups(deltaTime) {
-            gameState.powerups.forEach((powerup, index) => {
-                powerup.y += 1.5 * (deltaTime / 10); // Move down the screen
-                powerup.element.style.top = `${powerup.y}px`;
+            for (let i = gameState.powerups.length - 1; i >= 0; i--) {
+                const powerup = gameState.powerups[i];
+                powerup.y -= deltaTime * 0.2; // Move down the screen
+                powerup.element.style.bottom = `${powerup.y}px`;
 
-                const powerupRect = powerup.element.getBoundingClientRect();
-                const containerRect = gameContainer.getBoundingClientRect();
-
-                // Collection check based on screen position
-                if (powerupRect.bottom >= containerRect.bottom - 120 && powerup.lane === gameState.playerLane) {
+                // Collection check based on y position
+                if (powerup.y <= 120 && powerup.lane === gameState.playerLane) {
                     activatePowerup(powerup.type);
                     powerup.element.remove();
-                    gameState.powerups.splice(index, 1);
-                } else if (powerupRect.top > containerRect.bottom) { // Off screen
+                    gameState.powerups.splice(i, 1);
+                } else if (powerup.y <= 0) { // Off screen at bottom
                     powerup.element.remove();
-                    gameState.powerups.splice(index, 1);
+                    gameState.powerups.splice(i, 1);
                 }
-            });
+            }
         }
 
         function activatePowerup(type) {
@@ -731,35 +713,63 @@
                 muzzle: document.createElement('div'),
             };
 
-            turret.element.className = 'w-12 h-12 bg-gray-800 border-4 border-gray-500 rounded-t-lg flex items-center justify-center';
-            turret.muzzle.className = 'w-3 h-6 bg-red-500 rounded-t-md absolute -top-3';
+            turret.element.className = 'w-10 h-10 bg-gray-900 border-4 border-gray-600 flex items-center justify-center'; // Box-like
+            turret.muzzle.className = 'w-3 h-5 bg-red-500 absolute -top-3';
             turret.element.appendChild(turret.muzzle);
             
-            const slot = document.getElementById(`turret-slot-${lane}`);
-            slot.appendChild(turret.element);
+            // Position next to player
+            const playerX = lane === 0 ? '25%' : '75%';
+            turret.element.style.position = 'absolute';
+            turret.element.style.bottom = '60px'; // A bit above the player
+            turret.element.style.left = `calc(${playerX} + 40px)`; // Offset from player center
+            turret.element.style.transform = 'translateX(-50%)';
+
+            defenseContainer.appendChild(turret.element);
             
             gameState.turrets.push(turret);
         }
 
         function updateTurrets(deltaTime) {
-            gameState.turrets.forEach((turret, index) => {
+            for (let i = gameState.turrets.length - 1; i >= 0; i--) {
+                const turret = gameState.turrets[i];
                 turret.duration -= deltaTime;
                 const now = performance.now();
+
                 if (now - turret.lastShotTime > turret.fireRate) {
                     const hasTarget = gameState.zombies.some(z => z.lane === turret.lane);
                     if (hasTarget) {
                         turret.lastShotTime = now;
-                        // For demo, we don't create a real bullet. We just flash the muzzle.
-                         turret.muzzle.classList.add('animate-flash');
-                         setTimeout(() => turret.muzzle.classList.remove('animate-flash'), 100);
-                        // A real implementation would damage the first zombie in the lane
+                        // Create a real bullet for the turret
+                        createTurretBullet(turret);
+                        turret.muzzle.classList.add('animate-flash');
+                        setTimeout(() => turret.muzzle.classList.remove('animate-flash'), 100);
                     }
                 }
 
                 if (turret.duration <= 0) {
                     turret.element.remove();
-                    gameState.turrets.splice(index, 1);
+                    gameState.turrets.splice(i, 1);
                 }
+            }
+        }
+
+        function createTurretBullet(turret) {
+            const bullet = document.createElement('div');
+            bullet.className = 'absolute w-2 h-3 bg-orange-400 rounded-full shadow-md';
+            
+            const turretRect = turret.element.getBoundingClientRect();
+            const containerRect = gameContainer.getBoundingClientRect();
+
+            bullet.style.left = `${turretRect.left - containerRect.left + turretRect.width / 2}px`;
+            bullet.style.bottom = `${window.innerHeight - turretRect.top}px`;
+
+            gameContainer.appendChild(bullet);
+
+            gameState.bullets.push({
+                element: bullet,
+                y: window.innerHeight - turretRect.top,
+                ricochetCount: 0, // Turret bullets don't ricochet for now
+                lane: turret.lane
             });
         }
 
