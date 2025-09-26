@@ -5,7 +5,11 @@ const config = {
   height: 760,
   parent: 'game-container',
   backgroundColor: '#081018',
-  scene: { preload, create, update }
+  scene: { preload, create, update },
+  physics: {
+    default: 'arcade',
+    arcade: { debug: false }
+  }
 };
 
 const game = new Phaser.Game(config);
@@ -29,23 +33,72 @@ let ricochetTimer = null;
 let sludge = [false, false];
 
 function preload() {
-  this.load.image('player', 'https://i.imgur.com/3W6aQ0o.png'); // placeholder
-  this.load.image('bullet', 'https://i.imgur.com/6Xo1zKq.png');
-  this.load.image('shambler', 'https://i.imgur.com/8QGkKxK.png');
-  this.load.image('sprinter', 'https://i.imgur.com/8QGkKxK.png');
-  this.load.image('brute', 'https://i.imgur.com/8QGkKxK.png');
-  this.load.image('spitter', 'https://i.imgur.com/8QGkKxK.png');
-  this.load.image('drop', 'https://i.imgur.com/8QGkKxK.png');
+  // No external images — textures will be generated on the canvas in create().
+}
+
+function createTextures(scene) {
+  // helper to create simple primitive textures
+  const g = scene.add.graphics();
+
+  // Player: small rounded rectangle
+  g.clear();
+  g.fillStyle(0xeeeeee, 1);
+  g.fillRoundedRect(0, 0, 40, 40, 6);
+  g.generateTexture('player', 40, 40);
+
+  // Bullet: small circle
+  g.clear();
+  g.fillStyle(0xffffaa, 1);
+  g.fillCircle(6, 6, 6);
+  g.generateTexture('bullet', 12, 12);
+
+  // Shambler/Sprinter: small grey circle
+  g.clear();
+  g.fillStyle(0x99cc99, 1);
+  g.fillCircle(14, 14, 14);
+  g.generateTexture('shambler', 28, 28);
+
+  // Sprinter uses same base with different tint in code
+  g.clear();
+  g.fillStyle(0xaadd88, 1);
+  g.fillCircle(12, 12, 12);
+  g.generateTexture('sprinter', 24, 24);
+
+  // Brute: bigger circle
+  g.clear();
+  g.fillStyle(0x885555, 1);
+  g.fillCircle(22, 22, 22);
+  g.generateTexture('brute', 44, 44);
+
+  // Spitter: purple-ish small circle
+  g.clear();
+  g.fillStyle(0xff99cc, 1);
+  g.fillCircle(14, 14, 14);
+  g.generateTexture('spitter', 28, 28);
+
+  // Drop: glowing circle
+  g.clear();
+  g.fillStyle(0xa0ff66, 1);
+  g.fillCircle(10, 10, 10);
+  g.generateTexture('drop', 20, 20);
+
+  g.destroy();
 }
 
 function create() {
   this.cameras.main.setBackgroundColor('#0b0f14');
+
+  // Create programmatic textures used for sprites (no external images)
+  createTextures(this);
 
   // Lanes
   this.add.rectangle(210, 380, 400, 760, 0x071016).setAlpha(0.0);
 
   // Player
   player = this.add.image(lanes[currentLane], 660, 'player').setScale(0.6);
+
+  // Debug label to confirm scene running
+  this.add.text(12, 720, 'Lane Zero — Running', { fontSize: 12, color: '#88ff88' });
 
   bullets = this.physics.add.group();
   enemies = this.physics.add.group();
@@ -132,6 +185,10 @@ function update(time, delta) {
   if (ammoEl) ammoEl.innerText = ammo + (isReloading ? ' (R)' : '');
   if (healthEl) healthEl.innerText = Math.max(0, Math.floor(barricadeHealth));
   if (scrapEl) scrapEl.innerText = scrap;
+
+  // Clean up bullets and enemies off-screen
+  bullets.getChildren().forEach(b=>{ if (b.y < -50) b.destroy(); });
+  enemies.getChildren().forEach(e=>{ if (e.y > 820) e.destroy(); });
 }
 
 function switchLane(scene, lane) {
