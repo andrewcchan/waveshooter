@@ -1,22 +1,872 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Lane Zero — Prototype</title>
-  <link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Lane Zero</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Roboto Condensed', sans-serif;
+            touch-action: none; /* Prevents browser gestures like pull-to-refresh */
+            overscroll-behavior: none;
+        }
+
+        /* --- Game World Perspective --- */
+        #game-world {
+            perspective: 800px;
+        }
+
+        #game-lanes {
+            transform-style: preserve-3d;
+            transform: rotateX(45deg);
+        }
+
+        /* --- Dynamic Day/Night Cycle --- */
+        .dawn { filter: brightness(0.9) saturate(1.1); background: linear-gradient(to top, #2c3e50, #4e5a65); }
+        .midday { filter: brightness(1.1); background: linear-gradient(to top, #3498db, #85c1e9); }
+        .sunset { filter: brightness(1) saturate(1.5); background: linear-gradient(to top, #e67e22, #f39c12); }
+        .night { filter: brightness(0.7); background: linear-gradient(to top, #1B2631, #283747); }
+        .night .zombie .zombie-model { box-shadow: 0 0 15px 5px #ff4d4d; }
+
+        /* --- Animations --- */
+        @keyframes slideInUp {
+            from { transform: translateY(100vh); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translate(0, 0); }
+            25% { transform: translate(-3px, 0); }
+            50% { transform: translate(3px, 0); }
+            75% { transform: translate(-3px, 3px); }
+        }
+        
+        @keyframes barricadeHit {
+            0% { filter: brightness(1); }
+            50% { filter: brightness(2) drop-shadow(0 0 5px #ff0000); }
+            100% { filter: brightness(1); }
+        }
+
+        @keyframes flash {
+             0%, 100% { opacity: 1; }
+             50% { opacity: 0.5; }
+        }
+
+        .animate-slideInUp { animation: slideInUp 0.5s ease-out forwards; }
+        .animate-pulse { animation: pulse 2s infinite; }
+        .animate-shake { animation: shake 0.3s ease-in-out; }
+        .animate-barricadeHit { animation: barricadeHit 0.2s linear; }
+        .animate-flash { animation: flash 0.1s linear; }
+    </style>
 </head>
-<body>
-  <div id="game-container"></div>
-  <div class="hud top-center">WAVE 1</div>
-  <div class="hud top-left">Barricade: <span id="hud-health">100</span></div>
-  <div class="hud top-right">Scrap: <span id="hud-scrap">0</span></div>
-  <div class="hud bottom-left">
-    <div class="icon" id="ammo-icon">Ammo<br><span id="hud-ammo">12</span></div>
-  </div>
-  <button id="reload-btn" class="button">Reload</button>
-  <button id="cryo-btn" class="button" style="right:120px">Cryo</button>
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
-  <script src="src/game.js"></script>
+<body class="bg-gray-900 text-white overflow-hidden h-screen flex items-center justify-center select-none">
+
+    <!-- Game Container -->
+    <div id="game-container" class="relative w-full h-full max-w-lg mx-auto bg-gray-800 overflow-hidden shadow-2xl">
+
+        <!-- Header UI -->
+        <div id="game-ui-header" class="absolute top-0 left-0 right-0 p-2 z-20 bg-black bg-opacity-30">
+            <div class="flex justify-between items-center">
+                <!-- Barricade Health -->
+                <div class="w-1/3">
+                    <h2 class="text-sm font-bold text-green-400">BARRICADE</h2>
+                    <div class="bg-gray-700 rounded-full h-4 overflow-hidden border-2 border-green-900">
+                        <div id="barricade-health-bar" class="bg-green-500 h-full transition-all duration-300" style="width: 100%;"></div>
+                    </div>
+                </div>
+                <!-- Wave Number -->
+                <div class="text-center">
+                    <h1 id="wave-counter" class="text-2xl font-bold tracking-widest">WAVE 1</h1>
+                </div>
+                <!-- Scrap Counter -->
+                <div class="w-1/3 text-right">
+                     <h2 class="text-sm font-bold text-yellow-400">SCRAP</h2>
+                     <p id="scrap-counter" class="text-xl font-bold">$0</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Game World -->
+        <div id="game-world" class="absolute inset-0">
+            <div id="game-lanes" class="relative w-full h-full grid grid-cols-2 gap-2 p-2">
+                <!-- Lanes -->
+                <div id="lane-0" class="lane bg-gray-700/50 border-x-2 border-gray-500/50"></div>
+                <div id="lane-1" class="lane bg-gray-700/50 border-x-2 border-gray-500/50"></div>
+            </div>
+             <!-- Player and Defenses Container -->
+             <div id="defense-container" class="absolute bottom-0 left-0 right-0 h-1/4 z-10">
+                <!-- Player -->
+                <div id="player" class="absolute bottom-10 w-16 h-16 transition-all duration-100 ease-in-out" style="left: 25%; transform: translateX(-50%);">
+                     <div class="w-full h-full bg-blue-500 rounded-t-lg border-4 border-blue-300 shadow-lg flex items-center justify-center">
+                        <div id="player-muzzle" class="w-4 h-8 bg-gray-400 rounded-t-md absolute -top-4"></div>
+                     </div>
+                </div>
+                <!-- Barricade -->
+                <div id="barricade" class="absolute bottom-0 left-0 right-0 h-10 bg-gray-600 border-t-8 border-gray-800 flex items-center justify-between px-4">
+                    <div class="w-full h-full" style="background-image: repeating-linear-gradient(45deg, #4a5568, #4a5568 10px, #2d3748 10px, #2d3748 20px);"></div>
+                </div>
+                 <!-- Turrets -->
+                <div id="turret-slot-0" class="absolute bottom-10" style="left: 25%; transform: translateX(-50%);"></div>
+                <div id="turret-slot-1" class="absolute bottom-10" style="left: 75%; transform: translateX(-50%);"></div>
+             </div>
+        </div>
+        
+        <!-- Footer UI -->
+        <div id="game-ui-footer" class="absolute bottom-0 left-0 right-0 p-2 z-20 flex justify-between items-end">
+            <!-- Special Weapon -->
+            <div id="special-weapon-container" class="w-16 h-16"></div>
+            <!-- Weapon Info -->
+            <div class="text-center">
+                <p id="weapon-name" class="text-xl font-bold"></p>
+                <p id="ammo-counter" class="text-3xl font-bold tracking-widest"></p>
+                <button id="reload-button" class="hidden text-yellow-400 font-bold px-3 py-1 rounded-md bg-black/50">RELOAD</button>
+            </div>
+            <!-- Manual Reload Button for Mobile -->
+            <div class="w-16 h-16 flex items-center justify-center">
+                 <button id="manual-reload-btn" class="w-14 h-14 bg-yellow-500/80 rounded-full font-bold text-black text-xs border-4 border-yellow-300/80">RELOAD</button>
+            </div>
+        </div>
+
+        <!-- Overlays -->
+        <div id="overlay-container" class="absolute inset-0 z-30 flex items-center justify-center text-center p-4">
+            <!-- Start Screen -->
+            <div id="start-screen" class="bg-black bg-opacity-80 p-8 rounded-lg shadow-2xl animate-slideInUp">
+                <h1 class="text-6xl font-bold tracking-widest text-red-500">LANE ZERO</h1>
+                <p class="mt-4 text-gray-300">Swipe to switch lanes. Tap to shoot. Survive the horde.</p>
+                <button id="start-button" class="mt-8 bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-10 rounded-lg text-2xl animate-pulse">START</button>
+            </div>
+
+            <!-- Game Over Screen -->
+            <div id="game-over-screen" class="hidden bg-black bg-opacity-80 p-8 rounded-lg shadow-2xl">
+                <h1 class="text-6xl font-bold text-red-600">BARRICADE LOST</h1>
+                <p class="mt-2 text-2xl">You survived <span id="final-wave" class="font-bold text-yellow-400"></span> waves.</p>
+                <button id="restart-button" class="mt-8 bg-blue-500 hover:bg-blue-600 text-white font-bold py-4 px-10 rounded-lg text-2xl">TRY AGAIN</button>
+            </div>
+
+            <!-- Workshop Screen -->
+            <div id="workshop-screen" class="hidden bg-black bg-opacity-80 p-4 rounded-lg w-full max-w-md">
+                <h1 id="workshop-title" class="text-3xl font-bold text-yellow-400 mb-2">WORKSHOP</h1>
+                <p id="workshop-subtitle" class="text-lg mb-4">Spend your Scrap to prepare for the next wave.</p>
+                
+                <div id="upgrades-container" class="space-y-3 text-left">
+                    <!-- Upgrades will be dynamically inserted here -->
+                </div>
+                
+                <button id="next-wave-button" class="mt-6 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg text-xl w-full">START WAVE</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- DOM Elements ---
+        const gameContainer = document.getElementById('game-container');
+        const player = document.getElementById('player');
+        const barricade = document.getElementById('barricade');
+        const barricadeHealthBar = document.getElementById('barricade-health-bar');
+        const waveCounter = document.getElementById('wave-counter');
+        const scrapCounter = document.getElementById('scrap-counter');
+        const ammoCounter = document.getElementById('ammo-counter');
+        const weaponNameEl = document.getElementById('weapon-name');
+        const reloadButton = document.getElementById('reload-button');
+        const manualReloadBtn = document.getElementById('manual-reload-btn');
+        const defenseContainer = document.getElementById('defense-container');
+
+        const overlayContainer = document.getElementById('overlay-container');
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const workshopScreen = document.getElementById('workshop-screen');
+        const upgradesContainer = document.getElementById('upgrades-container');
+        
+        const startButton = document.getElementById('start-button');
+        const restartButton = document.getElementById('restart-button');
+        const nextWaveButton = document.getElementById('next-wave-button');
+
+        // --- Game State ---
+        let gameState = {
+            isRunning: false,
+            isGameOver: false,
+            isWaveActive: false,
+            isWorkshopOpen: false,
+            currentWave: 0,
+            scrap: 0,
+            barricadeHealth: 100,
+            maxBarricadeHealth: 100,
+            playerLane: 0, // 0 for left, 1 for right
+            zombies: [],
+            bullets: [],
+            powerups: [],
+            turrets: [],
+            time: 0,
+        };
+
+        // --- Game Config ---
+        const config = {
+            lanePositions: [window.innerWidth / 4, (window.innerWidth / 4) * 3], // Simplified for demo
+            playerBaseY: 40,
+            zombieSpawnStartY: -50,
+        };
+        
+        // --- Player & Weapon Stats ---
+        let playerState = {
+            weapons: {
+                handgun: {
+                    name: "Handgun",
+                    unlocked: true,
+                    damage: 10,
+                    fireRate: 250, // ms
+                    magazineSize: 12,
+                    reloadTime: 1500, // ms
+                    cost: 0,
+                    upgrades: [
+                        { name: "Damage", level: 0, cost: 50, value: 2 },
+                        { name: "Magazine", level: 0, cost: 30, value: 4 },
+                    ]
+                },
+                shotgun: {
+                    name: "Shotgun",
+                    unlocked: false,
+                    damage: 25,
+                    fireRate: 800,
+                    magazineSize: 6,
+                    reloadTime: 2500,
+                    bulletCount: 5, // Fires 5 pellets
+                    spread: 20, // pixels
+                    cost: 300,
+                    upgrades: [
+                        { name: "Damage", level: 0, cost: 100, value: 5 },
+                        { name: "Pellets", level: 0, cost: 150, value: 2 },
+                    ]
+                },
+                smg: {
+                    name: "SMG",
+                    unlocked: false,
+                    damage: 6,
+                    fireRate: 80,
+                    magazineSize: 30,
+                    reloadTime: 2000,
+                    cost: 500,
+                    upgrades: [
+                        { name: "Fire Rate", level: 0, cost: 200, value: -10 },
+                         { name: "Magazine", level: 0, cost: 100, value: 10 },
+                    ]
+                }
+            },
+            equippedWeapon: 'handgun',
+            ammo: 12,
+            isReloading: false,
+            lastShotTime: 0,
+            ricochetActive: false,
+            cryoGrenades: 0,
+        };
+        
+        const zombieTypes = {
+            shambler: { health: 30, speed: 0.5, damage: 5, scrap: 5, color: 'bg-green-700' },
+            sprinter: { health: 20, speed: 1.2, damage: 5, scrap: 8, color: 'bg-yellow-600' },
+            brute: { health: 200, speed: 0.3, damage: 20, scrap: 25, size: 'w-16 h-16', color: 'bg-red-800' },
+            spitter: { health: 40, speed: 0.4, damage: 0, scrap: 15, color: 'bg-purple-600', range: 400, fireRate: 3000, lastSpit: 0 },
+            drop: { health: 30, speed: 0.5, damage: 5, scrap: 10, color: 'bg-teal-400', glow: true }
+        };
+
+        // --- Game Setup ---
+        function initializeGame() {
+            // Reset state
+            gameState = {
+                isRunning: true,
+                isGameOver: false,
+                isWaveActive: false,
+                isWorkshopOpen: false,
+                currentWave: 0,
+                scrap: 0,
+                barricadeHealth: 100,
+                maxBarricadeHealth: 100,
+                playerLane: 0,
+                zombies: [],
+                bullets: [],
+                powerups: [],
+                turrets: [],
+                time: 0,
+            };
+            
+            // Reset Player
+             playerState.equippedWeapon = 'handgun';
+             playerState.ammo = playerState.weapons.handgun.magazineSize;
+             playerState.isReloading = false;
+             playerState.ricochetActive = false;
+             playerState.cryoGrenades = 0;
+            
+            // Reset UI
+            overlayContainer.style.display = 'none';
+            startScreen.style.display = 'none';
+            gameOverScreen.style.display = 'none';
+            workshopScreen.style.display = 'none';
+            
+            // Update UI elements
+            updateUI();
+            
+            // Start the first wave
+            startNextWave();
+        }
+
+        function startNextWave() {
+            gameState.currentWave++;
+            gameState.isWaveActive = true;
+            gameState.isWorkshopOpen = false;
+            workshopScreen.style.display = 'none';
+            overlayContainer.style.display = 'none';
+
+            spawnWave(gameState.currentWave);
+            updateUI();
+            updateDayNightCycle();
+        }
+
+        // --- Game Loop ---
+        let lastTime = 0;
+        function gameLoop(timestamp) {
+            if (gameState.isGameOver) return;
+
+            const deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+
+            if (gameState.isRunning && gameState.isWaveActive) {
+                gameState.time += deltaTime;
+                updateZombies(deltaTime);
+                updateBullets(deltaTime);
+                updatePowerups(deltaTime);
+                updateTurrets(deltaTime);
+                checkCollisions();
+
+                // Check for wave end
+                if (gameState.zombies.length === 0 && gameState.isWaveActive && isWaveFullySpawned()) {
+                     gameState.isWaveActive = false;
+                     setTimeout(openWorkshop, 2000); // Pause before workshop
+                }
+            }
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Player Controls ---
+        let touchStartX = 0;
+        gameContainer.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+        });
+
+        gameContainer.addEventListener('touchend', (e) => {
+            if (gameState.isWorkshopOpen || gameState.isGameOver) return;
+            const touchEndX = e.changedTouches[0].clientX;
+            const deltaX = touchEndX - touchStartX;
+
+            if (Math.abs(deltaX) > 50) { // Swipe detected
+                if (deltaX > 0) switchLane(1);
+                else switchLane(0);
+            } else { // Tap detected
+                shoot();
+            }
+        });
+        
+        manualReloadBtn.addEventListener('click', () => {
+             if (playerState.ammo < playerState.weapons[playerState.equippedWeapon].magazineSize) {
+                reload();
+            }
+        });
+
+
+        function switchLane(lane) {
+            gameState.playerLane = lane;
+            const targetX = lane === 0 ? '25%' : '75%';
+            player.style.left = targetX;
+        }
+
+        function shoot() {
+             if (playerState.isReloading || !gameState.isRunning) return;
+
+             const weapon = playerState.weapons[playerState.equippedWeapon];
+             const now = performance.now();
+             if (now - playerState.lastShotTime < weapon.fireRate) return;
+
+             if (playerState.ammo > 0) {
+                 playerState.lastShotTime = now;
+                 playerState.ammo--;
+
+                 const isShotgun = playerState.equippedWeapon === 'shotgun';
+                 const bulletCount = isShotgun ? weapon.bulletCount : 1;
+                 
+                 for(let i = 0; i < bulletCount; i++) {
+                    createBullet(isShotgun ? (Math.random() - 0.5) * weapon.spread : 0);
+                 }
+                
+                 player.classList.add('animate-flash');
+                 setTimeout(() => player.classList.remove('animate-flash'), 100);
+
+                 updateUI();
+             } else {
+                 reload();
+             }
+        }
+
+        function reload() {
+            if (playerState.isReloading) return;
+            playerState.isReloading = true;
+            reloadButton.style.display = 'block';
+            ammoCounter.innerText = "RELOADING";
+            
+            setTimeout(() => {
+                const weapon = playerState.weapons[playerState.equippedWeapon];
+                playerState.ammo = weapon.magazineSize;
+                playerState.isReloading = false;
+                reloadButton.style.display = 'none';
+                updateUI();
+            }, playerState.weapons[playerState.equippedWeapon].reloadTime);
+        }
+        
+        // --- Bullet Logic ---
+        function createBullet(spread) {
+            const bullet = document.createElement('div');
+            bullet.className = 'absolute w-2 h-4 bg-yellow-300 rounded-full shadow-lg';
+            const playerRect = player.getBoundingClientRect();
+            const containerRect = gameContainer.getBoundingClientRect();
+
+            bullet.style.left = `${playerRect.left - containerRect.left + (playerRect.width / 2) - 4 + spread}px`;
+            bullet.style.bottom = `${config.playerBaseY + playerRect.height}px`;
+
+            defenseContainer.appendChild(bullet);
+
+            gameState.bullets.push({
+                element: bullet,
+                y: config.playerBaseY + playerRect.height,
+                ricochetCount: playerState.ricochetActive ? 1 : 0,
+                lane: gameState.playerLane // Add the lane the bullet was fired in
+            });
+        }
+        
+        function updateBullets(deltaTime) {
+            gameState.bullets.forEach((bullet, index) => {
+                bullet.y += 10; // Speed
+                bullet.element.style.bottom = `${bullet.y}px`;
+
+                // Wall collision for ricochet
+                if (bullet.ricochetCount > 0) {
+                    const bulletRect = bullet.element.getBoundingClientRect();
+                    const laneElements = document.querySelectorAll('.lane');
+                    const leftLaneRect = laneElements[0].getBoundingClientRect();
+                    const rightLaneRect = laneElements[1].getBoundingClientRect();
+                    
+                    // This is a simplified check
+                    if (bulletRect.left < leftLaneRect.left || bulletRect.right > rightLaneRect.right) {
+                        // In a real 3D setup, we'd reverse velocity X. Here we fake it.
+                        // For this demo, ricochet is conceptual. A real implementation would need more complex physics.
+                        bullet.ricochetCount = 0; // Use up the ricochet
+                    }
+                }
+
+                if (bullet.y > window.innerHeight) {
+                    bullet.element.remove();
+                    gameState.bullets.splice(index, 1);
+                }
+            });
+        }
+        
+        // --- Zombie Logic ---
+        let waveSpawns = [];
+        function spawnWave(waveNum) {
+            waveSpawns = [];
+            const numZombies = 5 + waveNum * 2;
+            
+            for (let i = 0; i < numZombies; i++) {
+                 let zombieType;
+                 const rand = Math.random();
+                 if (waveNum > 2 && rand < 0.15) zombieType = 'sprinter';
+                 else if (waveNum > 4 && rand < 0.25) zombieType = 'brute';
+                 else if (waveNum > 3 && rand < 0.40) zombieType = 'spitter';
+                 else if (rand < 0.55) zombieType = 'drop';
+                 else zombieType = 'shambler';
+
+                 waveSpawns.push({
+                     type: zombieType,
+                     lane: Math.round(Math.random()),
+                     spawnTime: i * (1500 / (1 + waveNum * 0.1)) // Zombies spawn faster in later waves
+                 });
+            }
+        }
+
+        function isWaveFullySpawned() {
+            return waveSpawns.length === 0;
+        }
+
+        function createZombie(type, lane) {
+            const zombieData = zombieTypes[type];
+            const zombie = {
+                type: type,
+                id: Date.now() + Math.random(),
+                health: zombieData.health,
+                maxHealth: zombieData.health,
+                speed: zombieData.speed,
+                lane: lane,
+                y: config.zombieSpawnStartY,
+                element: document.createElement('div'),
+                healthBar: document.createElement('div'),
+                ...zombieData
+            };
+
+            zombie.element.className = `zombie absolute ${zombieData.size || 'w-12 h-12'}`;
+            zombie.element.style.top = `${zombie.y}px`;
+            zombie.element.style.left = lane === 0 ? `25%` : `75%`;
+            zombie.element.style.transform = 'translateX(-50%)';
+            
+            const model = document.createElement('div');
+            model.className = `zombie-model w-full h-full rounded-t-md border-2 border-black ${zombieData.color}`;
+            if(zombieData.glow) model.classList.add('animate-pulse');
+
+            const healthBarContainer = document.createElement('div');
+            healthBarContainer.className = 'absolute -top-3 w-full h-1 bg-gray-500 rounded-full';
+            zombie.healthBar.className = 'h-full bg-red-500 rounded-full';
+            zombie.healthBar.style.width = '100%';
+
+            healthBarContainer.appendChild(zombie.healthBar);
+            zombie.element.appendChild(model);
+            zombie.element.appendChild(healthBarContainer);
+            
+            document.getElementById('game-lanes').appendChild(zombie.element);
+            gameState.zombies.push(zombie);
+        }
+
+        function updateZombies(deltaTime) {
+            // Check for new spawns
+            if (waveSpawns.length > 0 && gameState.time >= waveSpawns[0].spawnTime) {
+                const spawn = waveSpawns.shift();
+                createZombie(spawn.type, spawn.lane);
+            }
+
+            // Move existing zombies
+            gameState.zombies.forEach((zombie, index) => {
+                zombie.y += zombie.speed * (deltaTime / 10);
+                zombie.element.style.top = `${zombie.y}px`;
+
+                // Spitter logic
+                if (zombie.type === 'spitter' && zombie.y < zombie.range) {
+                    const now = performance.now();
+                    if(now - zombie.lastSpit > zombie.fireRate) {
+                        zombie.lastSpit = now;
+                        createSludgePuddle(zombie.lane);
+                    }
+                }
+
+                // Zombie reaches barricade
+                if (zombie.y >= window.innerHeight - 80) {
+                    takeBarricadeDamage(zombie.damage);
+                    zombie.element.remove();
+                    gameState.zombies.splice(index, 1);
+                }
+            });
+        }
+        
+        function takeBarricadeDamage(damage) {
+            gameState.barricadeHealth -= damage;
+            barricade.classList.add('animate-barricadeHit');
+            setTimeout(() => barricade.classList.remove('animate-barricadeHit'), 200);
+
+            if (gameState.barricadeHealth <= 0) {
+                gameState.barricadeHealth = 0;
+                gameOver();
+            }
+            updateUI();
+        }
+
+        function createSludgePuddle(lane) {
+            const puddle = document.createElement('div');
+            puddle.className = 'absolute bottom-0 w-1/2 h-24 bg-purple-800/50 rounded-t-full opacity-50';
+            puddle.style.left = lane === 0 ? '0' : '50%';
+            defenseContainer.appendChild(puddle);
+            // This is visual only for the demo. Real implementation would check player lane against puddle lane.
+            setTimeout(() => puddle.remove(), 5000); // Puddle lasts 5 seconds
+        }
+
+
+        // --- Collision Detection ---
+        function checkCollisions() {
+            gameState.bullets.forEach((bullet, bIndex) => {
+                const bulletRect = bullet.element.getBoundingClientRect();
+                gameState.zombies.forEach((zombie, zIndex) => {
+                    if (bullet.lane !== zombie.lane) return; // Use bullet's lane for check
+
+                    const zombieRect = zombie.element.getBoundingClientRect();
+                    if (bulletRect.left < zombieRect.right &&
+                        bulletRect.right > zombieRect.left &&
+                        bulletRect.top < zombieRect.bottom &&
+                        bulletRect.bottom > zombieRect.top) {
+
+                        // Hit!
+                        zombie.health -= playerState.weapons[playerState.equippedWeapon].damage;
+                        zombie.healthBar.style.width = `${(zombie.health / zombie.maxHealth) * 100}%`;
+                        zombie.element.classList.add('animate-shake');
+                        setTimeout(() => zombie.element.classList.remove('animate-shake'), 200);
+
+                        if (zombie.health <= 0) {
+                            gameState.scrap += zombie.scrap;
+                            if (zombie.type === 'drop') {
+                                createPowerup(zombie);
+                            }
+                            zombie.element.remove();
+                            gameState.zombies.splice(zIndex, 1);
+                            updateUI();
+                        }
+                        
+                        if (bullet.ricochetCount <= 0) {
+                             bullet.element.remove();
+                             gameState.bullets.splice(bIndex, 1);
+                        }
+                    }
+                });
+            });
+        }
+        
+        // --- Powerups ---
+        function createPowerup(zombie) {
+            const powerupTypes = ['autocannon', 'ricochet', 'repair', 'cryo'];
+            const type = powerupTypes[Math.floor(Math.random() * powerupTypes.length)];
+
+            const powerup = {
+                type: type,
+                lane: zombie.lane,
+                y: zombie.y,
+                element: document.createElement('div')
+            };
+
+            powerup.element.className = 'absolute w-10 h-10 border-4 rounded-full animate-pulse z-10';
+            let iconText = '?';
+            switch (type) {
+                case 'autocannon': powerup.element.className += ' bg-red-500 border-red-300'; iconText = 'A'; break;
+                case 'ricochet': powerup.element.className += ' bg-blue-500 border-blue-300'; iconText = 'R'; break;
+                case 'repair': powerup.element.className += ' bg-green-500 border-green-300'; iconText = 'W'; break;
+                case 'cryo': powerup.element.className += ' bg-cyan-500 border-cyan-300'; iconText = 'C'; break;
+            }
+            powerup.element.innerText = iconText;
+            powerup.element.classList.add('flex', 'items-center', 'justify-center', 'font-bold', 'text-2xl');
+
+            powerup.element.style.left = zombie.lane === 0 ? '25%' : '75%';
+            powerup.element.style.transform = 'translateX(-50%)';
+            powerup.element.style.top = `${powerup.y}px`;
+
+            document.getElementById('game-lanes').appendChild(powerup.element);
+            gameState.powerups.push(powerup);
+        }
+        
+        function updatePowerups(deltaTime) {
+            gameState.powerups.forEach((powerup, index) => {
+                powerup.y += 1.5 * (deltaTime / 10); // Move down the screen
+                powerup.element.style.top = `${powerup.y}px`;
+
+                const powerupRect = powerup.element.getBoundingClientRect();
+                const containerRect = gameContainer.getBoundingClientRect();
+
+                // Collection check based on screen position
+                if (powerupRect.bottom >= containerRect.bottom - 120 && powerup.lane === gameState.playerLane) {
+                    activatePowerup(powerup.type);
+                    powerup.element.remove();
+                    gameState.powerups.splice(index, 1);
+                } else if (powerupRect.top > containerRect.bottom) { // Off screen
+                    powerup.element.remove();
+                    gameState.powerups.splice(index, 1);
+                }
+            });
+        }
+
+        function activatePowerup(type) {
+             switch (type) {
+                case 'autocannon': createTurret(gameState.playerLane); break;
+                case 'ricochet':
+                    playerState.ricochetActive = true;
+                    setTimeout(() => playerState.ricochetActive = false, 10000);
+                    break;
+                case 'repair':
+                    gameState.barricadeHealth = Math.min(gameState.maxBarricadeHealth, gameState.barricadeHealth + gameState.maxBarricadeHealth * 0.25);
+                    updateUI();
+                    break;
+                case 'cryo':
+                    playerState.cryoGrenades++;
+                    updateUI();
+                    break;
+            }
+        }
+        
+        // --- Turrets ---
+        function createTurret(lane) {
+            const turret = {
+                lane: lane,
+                duration: 15000,
+                fireRate: 500,
+                lastShotTime: 0,
+                element: document.createElement('div'),
+                muzzle: document.createElement('div'),
+            };
+
+            turret.element.className = 'w-12 h-12 bg-gray-800 border-4 border-gray-500 rounded-t-lg flex items-center justify-center';
+            turret.muzzle.className = 'w-3 h-6 bg-red-500 rounded-t-md absolute -top-3';
+            turret.element.appendChild(turret.muzzle);
+            
+            const slot = document.getElementById(`turret-slot-${lane}`);
+            slot.appendChild(turret.element);
+            
+            gameState.turrets.push(turret);
+        }
+
+        function updateTurrets(deltaTime) {
+            gameState.turrets.forEach((turret, index) => {
+                turret.duration -= deltaTime;
+                const now = performance.now();
+                if (now - turret.lastShotTime > turret.fireRate) {
+                    const hasTarget = gameState.zombies.some(z => z.lane === turret.lane);
+                    if (hasTarget) {
+                        turret.lastShotTime = now;
+                        // For demo, we don't create a real bullet. We just flash the muzzle.
+                         turret.muzzle.classList.add('animate-flash');
+                         setTimeout(() => turret.muzzle.classList.remove('animate-flash'), 100);
+                        // A real implementation would damage the first zombie in the lane
+                    }
+                }
+
+                if (turret.duration <= 0) {
+                    turret.element.remove();
+                    gameState.turrets.splice(index, 1);
+                }
+            });
+        }
+
+
+        // --- UI & Screens ---
+        function updateUI() {
+            barricadeHealthBar.style.width = `${(gameState.barricadeHealth / gameState.maxBarricadeHealth) * 100}%`;
+            waveCounter.innerText = `WAVE ${gameState.currentWave}`;
+            scrapCounter.innerText = `$${gameState.scrap}`;
+            
+            const weapon = playerState.weapons[playerState.equippedWeapon];
+            weaponNameEl.innerText = weapon.name;
+            if (!playerState.isReloading) {
+                 ammoCounter.innerText = `${playerState.ammo} / ${weapon.magazineSize}`;
+            }
+        }
+        
+        function updateDayNightCycle() {
+            const container = document.getElementById('game-world');
+            container.classList.remove('dawn', 'midday', 'sunset', 'night');
+            if (gameState.currentWave <= 10) container.classList.add('dawn');
+            else if (gameState.currentWave <= 20) container.classList.add('midday');
+            else if (gameState.currentWave <= 30) container.classList.add('sunset');
+            else container.classList.add('night');
+        }
+
+        function gameOver() {
+            gameState.isGameOver = true;
+            gameState.isRunning = false;
+            gameState.isWaveActive = false;
+            overlayContainer.style.display = 'flex';
+            gameOverScreen.style.display = 'block';
+            document.getElementById('final-wave').innerText = gameState.currentWave;
+            // Clean up entities
+            [...gameState.zombies, ...gameState.bullets, ...gameState.powerups, ...gameState.turrets].forEach(e => e.element?.remove());
+        }
+
+        function openWorkshop() {
+            gameState.isWorkshopOpen = true;
+            overlayContainer.style.display = 'flex';
+            workshopScreen.style.display = 'block';
+            document.getElementById('workshop-title').innerText = `WAVE ${gameState.currentWave} CLEARED`;
+            populateWorkshop();
+        }
+
+        function populateWorkshop() {
+             upgradesContainer.innerHTML = ''; // Clear previous upgrades
+             const createUpgradeButton = (text, cost, callback) => {
+                const button = document.createElement('button');
+                button.className = 'w-full text-left p-2 rounded-md transition-colors flex justify-between items-center';
+                const canAfford = gameState.scrap >= cost;
+                button.disabled = !canAfford;
+                button.className += canAfford ? ' bg-gray-700 hover:bg-gray-600' : ' bg-gray-800 text-gray-500';
+                button.innerHTML = `<span>${text}</span> <span class="font-bold text-yellow-400">$${cost}</span>`;
+                button.onclick = () => {
+                    if (gameState.scrap >= cost) {
+                        gameState.scrap -= cost;
+                        callback();
+                        populateWorkshop(); // Refresh workshop UI
+                        updateUI();
+                    }
+                };
+                return button;
+             };
+             
+             // Barricade Repair
+             const repairCost = 50;
+             if (gameState.barricadeHealth < gameState.maxBarricadeHealth) {
+                 const repairBtn = createUpgradeButton(`Repair Barricade (+25%)`, repairCost, () => {
+                     gameState.barricadeHealth = Math.min(gameState.maxBarricadeHealth, gameState.barricadeHealth + gameState.maxBarricadeHealth * 0.25);
+                 });
+                 upgradesContainer.appendChild(repairBtn);
+             }
+
+             // Weapon Unlocks & Upgrades
+             for (const weaponKey in playerState.weapons) {
+                const weapon = playerState.weapons[weaponKey];
+                if (!weapon.unlocked) {
+                    const unlockBtn = createUpgradeButton(`Unlock ${weapon.name}`, weapon.cost, () => {
+                        weapon.unlocked = true;
+                    });
+                    upgradesContainer.appendChild(unlockBtn);
+                } else {
+                    // Switch Weapon Button
+                    if (playerState.equippedWeapon !== weaponKey) {
+                        const equipBtn = document.createElement('button');
+                        equipBtn.className = 'w-full text-left p-2 rounded-md bg-blue-800 hover:bg-blue-700';
+                        equipBtn.innerText = `Equip ${weapon.name}`;
+                        equipBtn.onclick = () => {
+                            playerState.equippedWeapon = weaponKey;
+                            playerState.ammo = weapon.magazineSize;
+                            updateUI();
+                            populateWorkshop();
+                        };
+                        upgradesContainer.appendChild(equipBtn);
+                    } else {
+                         const equippedText = document.createElement('div');
+                         equippedText.className = 'p-2 bg-green-900/50 rounded-md text-center text-green-300 font-bold';
+                         equippedText.innerText = `${weapon.name} EQUIPPED`;
+                         upgradesContainer.appendChild(equippedText);
+                    }
+                 }
+             }
+        }
+
+
+        // --- Event Listeners ---
+        startButton.addEventListener('click', () => {
+            startScreen.style.display = 'none';
+            overlayContainer.style.display = 'none';
+            initializeGame();
+            requestAnimationFrame(gameLoop);
+        });
+        
+        restartButton.addEventListener('click', () => {
+            gameOverScreen.style.display = 'none';
+            initializeGame();
+        });
+        
+        nextWaveButton.addEventListener('click', () => {
+            startNextWave();
+        });
+        
+        // Initial setup
+        overlayContainer.style.display = 'flex';
+        startScreen.style.display = 'block';
+
+    });
+    </script>
 </body>
 </html>
+
+
