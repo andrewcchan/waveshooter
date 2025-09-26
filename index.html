@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Lane Zero — Prototype</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game-container"></div>
+  <div class="hud top-center">WAVE 1</div>
+  <div class="hud top-left">Barricade: <span id="hud-health">100</span></div>
+  <div class="hud top-right">Scrap: <span id="hud-scrap">0</span></div>
+  <div class="hud bottom-left">
+    <div class="icon" id="ammo-icon">Ammo<br><span id="hud-ammo">12</span></div>
+  </div>
+  <button id="reload-btn" class="button">Reload</button>
+  <button id="cryo-btn" class="button" style="right:120px">Cryo</button>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+  <script src="src/game.js"></script>
+</body>
+</html>
