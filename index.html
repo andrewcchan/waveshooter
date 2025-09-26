@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Lane Zero</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -11,6 +11,29 @@
             font-family: 'Roboto Condensed', sans-serif;
             touch-action: none; /* Prevents browser gestures like pull-to-refresh */
             overscroll-behavior: none;
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+
+        html {
+            height: 100%;
+            width: 100vw;
+            box-sizing: border-box;
+        }
+
+        #game-container {
+            width: 100vw !important;
+            height: 100vh !important;
+            max-width: 100vw !important;
+            max-height: 100vh !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+            box-sizing: border-box;
         }
 
         /* --- Game World Perspective --- */
@@ -69,7 +92,7 @@
 <body class="bg-gray-900 text-white overflow-hidden h-screen flex items-center justify-center select-none">
 
     <!-- Game Container -->
-    <div id="game-container" class="relative w-full h-full max-w-lg mx-auto bg-gray-800 overflow-hidden shadow-2xl">
+    <div id="game-container" class="relative bg-gray-800 overflow-hidden shadow-2xl">
 
         <!-- Header UI -->
         <div id="game-ui-header" class="absolute top-0 left-0 right-0 p-2 z-20 bg-black bg-opacity-30">
