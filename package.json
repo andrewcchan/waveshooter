@@ -1,0 +1,13 @@
+{
+  "name": "app",
+  "version": "1.0.0",
+  "main": "index.js",
+  "author": "google-labs-jules[bot] <161369871+google-labs-jules[bot]@users.noreply.github.com>",
+  "license": "MIT",
+  "scripts": {
+    "start": "npx vite"
+  },
+  "dependencies": {
+    "vite": "^7.1.7"
+  }
+}
